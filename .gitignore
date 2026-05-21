@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# CloakBrowser reference clone (not part of project)
+CloakBrowser/
+
+# Secrets / tokens — NEVER commit
+grabber/accounts.txt
+grabber/profiles/
+grabber/output/
+samples/outputs/
+samples/test_input.json
+
+# Exploratory scripts có hardcoded credentials
+explore_login.py
+
+# Debug artifacts
+docs/debug/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
