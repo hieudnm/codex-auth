@@ -45,8 +45,19 @@ def _check_cloudflare(page) -> None:
 
 
 def _fetch_session(page) -> dict | None:
-    """Navigate /api/auth/session và parse JSON. Trả None nếu không phải session JSON."""
-    page.goto(SESSION_URL, wait_until="domcontentloaded")
+    """Navigate /api/auth/session và parse JSON. Trả None nếu không phải session JSON.
+
+    Retry once nếu goto bị interrupted bởi in-flight navigation (race sau MFA submit).
+    """
+    for attempt in range(2):
+        try:
+            page.goto(SESSION_URL, wait_until="domcontentloaded")
+            break
+        except Exception as e:
+            if attempt == 0 and "interrupted by another navigation" in str(e):
+                time.sleep(2)  # wait for in-flight redirect to settle
+                continue
+            raise
     time.sleep(1.0)
     body = page.evaluate("() => document.body.innerText")
     if '"user"' in body and '"accessToken"' in body:
@@ -222,7 +233,16 @@ async def _check_cloudflare_async(page) -> None:
 
 
 async def _fetch_session_async(page) -> dict | None:
-    await page.goto(SESSION_URL, wait_until="domcontentloaded")
+    """Async version with retry-on-navigation-interrupted (race sau MFA submit)."""
+    for attempt in range(2):
+        try:
+            await page.goto(SESSION_URL, wait_until="domcontentloaded")
+            break
+        except Exception as e:
+            if attempt == 0 and "interrupted by another navigation" in str(e):
+                await asyncio.sleep(2)
+                continue
+            raise
     await asyncio.sleep(1.0)
     body = await page.evaluate("() => document.body.innerText")
     if '"user"' in body and '"accessToken"' in body:
