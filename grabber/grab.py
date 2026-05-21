@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
+import random
 import sys
 import time
 from pathlib import Path
 
 from grabber.accounts import Account, parse_accounts, ParseError
-from grabber.chatgpt_flow import grab_session
+from grabber.chatgpt_flow import grab_session, grab_session_async
 from grabber.convert import build_filename, convert
 from grabber.errors import GrabError
 
@@ -57,11 +59,51 @@ def process_one(account: Account, headless: bool) -> tuple[bool, str, float]:
         return False, f"UNKNOWN: {e}", elapsed
 
 
+async def process_one_async(account: Account, headless: bool) -> tuple[bool, str, float]:
+    start = time.monotonic()
+    profile = PROFILES_DIR / account.email
+    try:
+        session = await grab_session_async(account, profile, headless=headless)
+        auth = convert(session)
+        plan = session.get("account", {}).get("planType", "unknown")
+        filename = build_filename(auth["email"] or account.email, plan)
+        out_path = OUTPUT_DIR / filename
+        out_path.write_text(json.dumps(auth, indent=2), encoding="utf-8")
+        return True, filename, time.monotonic() - start
+    except GrabError as e:
+        return False, f"{e.code}: {e}", time.monotonic() - start
+    except Exception as e:
+        logging.exception("[%s] unexpected error", account.email)
+        return False, f"UNKNOWN: {e}", time.monotonic() - start
+
+
+async def run_parallel(accounts: list[Account], concurrency: int, headless: bool):
+    sem = asyncio.Semaphore(concurrency)
+    results: list[tuple[Account, bool, str, float]] = []
+    lock = asyncio.Lock()
+
+    async def worker(idx: int, acc: Account):
+        async with sem:
+            await asyncio.sleep(random.uniform(0, 1.5))  # stagger
+            prefix = f"[{idx}/{len(accounts)}]"
+            async with lock:
+                print(f"{prefix} ▶ {acc.email}", flush=True)
+            ok, msg, dt = await process_one_async(acc, headless=headless)
+            mark = "✓" if ok else "✗"
+            async with lock:
+                print(f"{prefix} {mark} {acc.email:<40} {msg}  ({dt:.1f}s)", flush=True)
+            results.append((acc, ok, msg, dt))
+
+    await asyncio.gather(*[worker(i, a) for i, a in enumerate(accounts, 1)])
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Auto-grab ChatGPT sessions → auth.json")
     parser.add_argument("--accounts", default=str(DEFAULT_ACCOUNTS), help="Path to accounts.txt")
     parser.add_argument("--only", help="Process only this email")
     parser.add_argument("--headless", action="store_true", help="Hide browser")
+    parser.add_argument("--parallel", type=int, default=1, help="Number of concurrent workers (default 1)")
     args = parser.parse_args(argv)
 
     setup_logging()
@@ -82,17 +124,26 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: no account with email '{args.only}'", file=sys.stderr)
             return 1
 
-    print(f"\nProcessing {len(accounts)} account(s)...\n")
-    total_start = time.monotonic()
-    results: list[tuple[Account, bool, str, float]] = []
+    if args.parallel < 1:
+        print("ERROR: --parallel must be >= 1", file=sys.stderr)
+        return 1
+    if args.parallel > 8:
+        print(f"WARN: --parallel={args.parallel} may trigger rate limits; recommend <=5", file=sys.stderr)
 
-    for i, acc in enumerate(accounts, 1):
-        prefix = f"[{i}/{len(accounts)}]"
-        print(f"{prefix} ▶ {acc.email}", flush=True)
-        ok, msg, dt = process_one(acc, headless=args.headless)
-        mark = "✓" if ok else "✗"
-        print(f"{prefix} {mark} {acc.email:<40} {msg}  ({dt:.1f}s)\n", flush=True)
-        results.append((acc, ok, msg, dt))
+    print(f"\nProcessing {len(accounts)} account(s), parallel={args.parallel}...\n")
+    total_start = time.monotonic()
+
+    if args.parallel == 1:
+        results: list[tuple[Account, bool, str, float]] = []
+        for i, acc in enumerate(accounts, 1):
+            prefix = f"[{i}/{len(accounts)}]"
+            print(f"{prefix} ▶ {acc.email}", flush=True)
+            ok, msg, dt = process_one(acc, headless=args.headless)
+            mark = "✓" if ok else "✗"
+            print(f"{prefix} {mark} {acc.email:<40} {msg}  ({dt:.1f}s)\n", flush=True)
+            results.append((acc, ok, msg, dt))
+    else:
+        results = asyncio.run(run_parallel(accounts, args.parallel, args.headless))
 
     ok_count = sum(1 for _, o, _, _ in results if o)
     fail_count = len(results) - ok_count
