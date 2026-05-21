@@ -1,0 +1,9 @@
+# Format: email | password | totp_secret
+# - totp_secret optional (omit nếu account không bật 2FA)
+# - khoảng trắng quanh `|` được trim
+# - dòng bắt đầu # là comment, dòng trống bị skip
+# - email duy nhất trong file
+# - password chứa `|` thì escape thành \|
+
+demo@example.com | mypassword | UMKRI7F6YYQJIR44MR2CZXLHFFQJMYFC
+nomfa@example.com | simplepass
