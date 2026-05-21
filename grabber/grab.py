@@ -12,7 +12,7 @@ from pathlib import Path
 
 from grabber.accounts import Account, parse_accounts, ParseError
 from grabber.chatgpt_flow import grab_session, grab_session_async
-from grabber.convert import build_filename, convert
+from grabber.convert import build_filename, convert, decode_jwt_payload
 from grabber.errors import GrabError
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -23,6 +23,21 @@ DEFAULT_ACCOUNTS = ROOT / "accounts.txt"
 PROFILES_DIR = ROOT / "profiles"
 OUTPUT_DIR = ROOT / "output"
 LOG_FILE = OUTPUT_DIR / "grab.log"
+
+
+def has_valid_existing_output(path: Path) -> bool:
+    """True nếu file path tồn tại + access_token chưa hết hạn."""
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    token = data.get("access_token") or ""
+    exp = decode_jwt_payload(token).get("exp")
+    if not exp:
+        return False
+    return exp > time.time()
 
 
 def setup_logging() -> None:
@@ -104,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", help="Process only this email")
     parser.add_argument("--headless", action="store_true", help="Hide browser")
     parser.add_argument("--parallel", type=int, default=1, help="Number of concurrent workers (default 1)")
+    parser.add_argument("--skip-valid", action="store_true",
+                        help="Skip account if output exists and token not expired")
     args = parser.parse_args(argv)
 
     setup_logging()
@@ -129,6 +146,20 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.parallel > 8:
         print(f"WARN: --parallel={args.parallel} may trigger rate limits; recommend <=5", file=sys.stderr)
+
+    if args.skip_valid:
+        keep = []
+        for a in accounts:
+            pattern = build_filename(a.email, "*").replace("*.json", "*.json")
+            matches = list(OUTPUT_DIR.glob(pattern))
+            if matches and any(has_valid_existing_output(m) for m in matches):
+                print(f"[skip] {a.email}: existing token still valid")
+                continue
+            keep.append(a)
+        accounts = keep
+        if not accounts:
+            print("All accounts skipped (existing tokens valid).")
+            return 0
 
     print(f"\nProcessing {len(accounts)} account(s), parallel={args.parallel}...\n")
     total_start = time.monotonic()
