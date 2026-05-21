@@ -1,31 +1,68 @@
-# grabber — Auto session grabber (planning)
+# grabber — Auto session grabber
 
-🚧 **Trạng thái:** Design done, chưa implement.
+Đọc `accounts.txt`, login ChatGPT tự động bằng CloakBrowser (stealth Chromium), fetch `/api/auth/session`, ghi ra `output/codex-<email>-<plan>.json`.
 
-Xem thiết kế chi tiết: [`../docs/superpowers/specs/2026-05-21-grabber-design.md`](../docs/superpowers/specs/2026-05-21-grabber-design.md)
-
-## Tóm tắt
-
-Đọc `accounts.txt` (định dạng `email | password | totp_secret`), tự động:
-1. Login ChatGPT bằng CloakBrowser stealth (pass Cloudflare Turnstile)
-2. Generate TOTP code qua `pyotp` nếu MFA bật
-3. Fetch `/api/auth/session`
-4. Convert sang `auth.json` format
-5. Ghi `output/codex-<email>-<plan>.json`
-
-## CLI (kế hoạch)
+## Setup
 
 ```powershell
-python grab.py                          # all accounts, sequential, headed
-python grab.py --only EMAIL             # 1 account
-python grab.py --headless               # ẩn browser
-python grab.py --parallel N             # N worker song song
-python grab.py --skip-valid             # bỏ qua account đã có token chưa hết hạn
+# Từ project root
+.\.venv\Scripts\Activate.ps1
+pip install -r grabber/requirements.txt
+python -m cloakbrowser install   # pre-download stealth Chromium ~200MB (1 lần)
 ```
 
-## Dependencies (kế hoạch)
+## Cấu hình accounts
+
+```powershell
+cp grabber/accounts.example.txt grabber/accounts.txt
+# Edit grabber/accounts.txt - mỗi dòng: email | password | totp_secret
+```
+
+`accounts.txt` đã được gitignored.
+
+## Dùng
+
+```powershell
+# Tất cả account, sequential, có browser hiện ra (debug-friendly)
+python -m grabber.grab
+
+# Chỉ 1 account
+python -m grabber.grab --only email@example.com
+
+# Ẩn browser, 3 worker song song
+python -m grabber.grab --headless --parallel 3
+
+# Bỏ qua account đã có token chưa hết hạn
+python -m grabber.grab --skip-valid
+
+# Dùng accounts file khác
+python -m grabber.grab --accounts /path/to/other.txt
+```
+
+## Output
 
 ```
-cloakbrowser>=0.3.30
-pyotp>=2.9.0
+grabber/output/
+├── codex-<email>-<plan>.json     # 9-field auth.json
+└── grab.log                       # timestamped log
 ```
+
+## Error codes
+
+| Code | Khi nào |
+|---|---|
+| `CAPTCHA_DETECTED` | Cloudflare/Turnstile/hCaptcha iframe xuất hiện |
+| `CHALLENGE_PAGE` | URL chứa `/challenge/` hoặc `/cdn-cgi/challenge-platform` |
+| `LOGIN_FAILED` | Sai password, hoặc redirect bất thường sau login |
+| `MFA_FAILED` | TOTP code bị reject |
+| `MFA_REQUIRED_NO_SECRET` | Có prompt MFA nhưng accounts.txt không cho secret |
+| `NETWORK_ERROR` | Timeout, browser launch fail |
+| `DOM_CHANGED` | Selector không match (OpenAI đổi UI) |
+| `TIMEOUT` | Vượt 90s/account |
+
+Mọi lỗi → skip account đó, log, tiếp tục account khác. Không retry.
+
+## Limits
+
+- Tối đa khuyến nghị `--parallel 5` (RAM ~280MB/instance, OpenAI rate limit).
+- Profile cache trong `grabber/profiles/<email>/` — lần sau skip login nếu cookie còn hạn.

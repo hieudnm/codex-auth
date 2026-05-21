@@ -6,7 +6,7 @@ Bộ công cụ tạo file `auth.json` chuẩn Codex CLI từ session ChatGPT. G
 |---|---|---|
 | [`web/`](web/) | Web UI paste session JSON → tải về `auth.json` (client-side, 100% browser) | ✅ Done |
 | [`cli/`](cli/) | Python scripts: OAuth PKCE login Codex CLI thật + convert session JSON | ✅ Done |
-| [`grabber/`](grabber/) | Auto-grabber: đọc `accounts.txt` → login tự động → ghi `auth.json` | 🚧 Planning |
+| [`grabber/`](grabber/) | Auto-grabber: đọc `accounts.txt` → login tự động → ghi `auth.json` | ✅ Done |
 
 Thiết kế chi tiết module `grabber/` ở [docs/superpowers/specs/2026-05-21-grabber-design.md](docs/superpowers/specs/2026-05-21-grabber-design.md).
 
